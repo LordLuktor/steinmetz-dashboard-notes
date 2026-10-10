@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Steinmetz Dashboard Notes
  * Description: Adds a simple notes section to the WordPress dashboard for administrators.
- * Version: 1.3.0
+ * Version: 1.3.1
  * Author: Steinmetz Ventures LLC
  * Author URI: https://apexweb.us
  * Update URI: https://github.com/LordLuktor/steinmetz-dashboard-notes
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('SDN_VERSION', '1.3.0');
+define('SDN_VERSION', '1.3.1');
 define('SDN_GITHUB_REPO', 'LordLuktor/steinmetz-dashboard-notes');
 
 // Built-in updater: checks this plugin's own public GitHub releases (no Git Updater needed).

@@ -16,7 +16,6 @@ class SDN_GitHub_Updater {
     const OPTION_STATUS = 'sdn_github_updater_status';
     const CACHE_KEY     = 'sdn_github_release';
     const CACHE_TTL     = 6 * HOUR_IN_SECONDS;
-    const API_BASE      = 'https://api.github.com/repos/';
 
     private $repo;
     private $basename;
@@ -56,49 +55,44 @@ class SDN_GitHub_Updater {
             }
         }
 
-        $response = wp_remote_get(self::API_BASE . $this->repo . '/releases/latest', array(
-            'headers' => array(
-                'Accept'               => 'application/vnd.github+json',
-                'User-Agent'           => 'steinmetz-dashboard-notes-updater',
-                'X-GitHub-Api-Version' => '2022-11-28',
-            ),
-            'timeout' => 15,
+        // Read the tag from github.com's "latest release" redirect instead of the
+        // REST API: anonymous API calls are capped at 60/hour per IP, and shared
+        // hosts (Pressable) exhaust that, so the API answers 403.
+        $response = wp_remote_head('https://github.com/' . $this->repo . '/releases/latest', array(
+            'headers'     => array('User-Agent' => 'steinmetz-dashboard-notes-updater'),
+            'redirection' => 0,
+            'timeout'     => 15,
         ));
 
-        $code = wp_remote_retrieve_response_code($response);
-        if (is_wp_error($response) || 200 !== $code) {
-            $this->set_status(is_wp_error($response) ? $response->get_error_message() : 'HTTP ' . intval($code));
-            // Cache the failure briefly so we don't hammer the API.
+        $code     = wp_remote_retrieve_response_code($response);
+        $location = is_wp_error($response) ? '' : (string) wp_remote_retrieve_header($response, 'location');
+        $tag_base = 'https://github.com/' . $this->repo . '/releases/tag/';
+
+        if (is_wp_error($response) || 302 !== $code || 0 !== strpos($location, $tag_base)) {
+            $this->set_status(is_wp_error($response) ? $response->get_error_message() : 'HTTP ' . intval($code) . ' (no release found)');
+            // Cache the failure briefly so we don't hammer GitHub.
             set_site_transient(self::CACHE_KEY, array(), HOUR_IN_SECONDS);
             return array();
         }
 
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-        if (empty($body['tag_name'])) {
-            $this->set_status('No release found');
+        $tag = rawurldecode(substr($location, strlen($tag_base)));
+        if (!preg_match('/^v?\d+(\.\d+){1,3}$/', $tag)) {
+            $this->set_status('Unexpected release tag');
             set_site_transient(self::CACHE_KEY, array(), HOUR_IN_SECONDS);
             return array();
         }
 
-        $package = '';
-        if (!empty($body['assets']) && is_array($body['assets'])) {
-            foreach ($body['assets'] as $asset) {
-                if (!empty($asset['browser_download_url']) && $asset['name'] === $this->slug . '.zip') {
-                    $package = $asset['browser_download_url'];
-                    break;
-                }
-            }
-        }
+        $package = 'https://github.com/' . $this->repo . '/releases/download/' . $tag . '/' . $this->slug . '.zip';
 
         $release = array(
-            'version'   => ltrim((string) $body['tag_name'], 'vV'),
+            'version'   => ltrim($tag, 'vV'),
             'package'   => $this->is_own_package_url($package) ? esc_url_raw($package) : '',
-            'html_url'  => isset($body['html_url']) ? esc_url_raw($body['html_url']) : '',
-            'notes'     => isset($body['body']) ? (string) $body['body'] : '',
-            'published' => isset($body['published_at']) ? (string) $body['published_at'] : '',
+            'html_url'  => esc_url_raw($tag_base . $tag),
+            'notes'     => 'See the release notes on GitHub: ' . $tag_base . $tag,
+            'published' => '',
         );
 
-        $this->set_status($release['package'] ? 'ok' : 'Release has no ' . $this->slug . '.zip');
+        $this->set_status('ok');
         set_site_transient(self::CACHE_KEY, $release, self::CACHE_TTL);
         return $release;
     }
